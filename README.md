@@ -12,7 +12,7 @@
 - 自动解包：可在下载完成后，调用已安装的 AssetRipper 对文件进行解包（需用户自行配置）。
 
 ## 使用方法
-1. 下载并运行 ``vrchat_vrca_downloader.exe``
+1. 下载并运行 [vrchat_vrca_downloader.exe](https://github.com/Null-K/VRChatVRCADownloader/blob/main/build/vrchat_vrca_downloader.exe)
 2. 在顶部 Cookie 输入框中输入你的 ``Auth Cookie``
 
    <img src="images/cookie.png" width="600">
