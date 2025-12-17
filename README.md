@@ -2,6 +2,10 @@
 **VRChat VRCA Downloader** 是一款专为 VRChat 玩家设计的模型下载工具。  
 通过 VRChat 官方 API 访问文件列表，帮助用户下载自己账号下的 Avatar 模型文件（.vrca），并可选配合第三方工具进行本地解包。
 
+<p align="center">
+  <img src="images/main.png" width="600">
+</p>
+
 ## 软件亮点
 - 完全合规：使用 `Auth Cookie` 进行身份验证，不保存用户密码，所有请求均通过 VRChat 官方 API 接口完成。
 - 模型同步：一键获取账号下所有已上传的 Avatar 列表，仅显示每个模型的最新版本，支持名称搜索。
@@ -10,7 +14,10 @@
 ## 使用方法
 1. 下载并运行 ``vrchat_vrca_downloader.exe``
 2. 在顶部 Cookie 输入框中输入你的 ``Auth Cookie``
-3. 点击 ``获取模型`` 按钮刷新列表
+
+   <img src="images/cookie.png" width="600">
+
+4. 点击 ``获取模型`` 按钮刷新列表
 
 ## 注意事项
 - 使用自动解包功能前，需要用户自行下载、安装并运行 [AssetRipper](https://github.com/AssetRipper/AssetRipper/releases) 。
