@@ -53,9 +53,9 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("VRChat VRCA Downloader")
-        self.geometry("1040x700")
+        self.geometry("1000x700")
         
-        self.minsize(1025, 500)
+        self.minsize(990, 500)
 
         self.cookie_var = tk.StringVar()
         self.search_var = tk.StringVar()
@@ -83,12 +83,12 @@ class App(tk.Tk):
         ttk.Separator(top, orient="vertical").pack(side="left", fill="y", padx=10)
 
         ttk.Label(top, text="搜索:").pack(side="left")
-        ttk.Entry(top, textvariable=self.search_var, width=25).pack(side="left", padx=5)
+        ttk.Entry(top, textvariable=self.search_var, width=15).pack(side="left", padx=5)
         self.search_var.trace_add("write", lambda *_: self.render_list())
 
         ttk.Separator(top, orient="vertical").pack(side="left", fill="y", padx=10)
 
-        self.check_rip = ttk.Checkbutton(top, text="下载后自动解包", variable=self.auto_rip_var)
+        self.check_rip = ttk.Checkbutton(top, text="自动调用 AssetRipper", variable=self.auto_rip_var)
         self.check_rip.pack(side="left", padx=5)
 
         ttk.Label(top, text="端口:").pack(side="left", padx=(5, 0))
@@ -289,13 +289,13 @@ class App(tk.Tk):
 
         current_port = self.rip_port_var.get().strip()
         if not current_port:
-            self.after(0, messagebox.showinfo, "下载成功", f"{name} 下载完成\n\nAssetRipper 软件端口未填写, 跳过自动解包")
+            self.after(0, messagebox.showinfo, "下载成功", f"{name} 下载完成\n\nAssetRipper 软件端口未填写, 跳过调用")
             return
 
         dynamic_ripper_api = f"http://127.0.0.1:{current_port}"
 
         def api_task():
-            self.after(0, self.status_title.config, {"text": "正在向 AssetRipper 发送解包请求..."})
+            self.after(0, self.status_title.config, {"text": "正在向 AssetRipper 发送请求..."})
             try:
                 try: requests.post(f"{dynamic_ripper_api}/Reset", timeout=2)
                 except: pass
@@ -304,14 +304,14 @@ class App(tk.Tk):
                 res = requests.post(f"{dynamic_ripper_api}/Export/UnityProject", data={'path': output_dir}, timeout=30)
                 
                 if 200 <= res.status_code < 400:
-                    self.after(0, messagebox.showinfo, "下载成功", f"{name} 下载完成\n\n自动解包请求已发送, 目录: {output_dir}")
+                    self.after(0, messagebox.showinfo, "下载成功", f"{name} 下载完成\n\nAssetRipper 请求已发送, 目录: {output_dir}")
                 else:
-                    self.after(0, messagebox.showinfo, "下载成功", f"{name} 下载完成\n\n解包指令已发送但响应异常({res.status_code}), 请检查 AssetRipper 控制台")
+                    self.after(0, messagebox.showinfo, "下载成功", f"{name} 下载完成\n\nAssetRipper 请求已发送但响应异常({res.status_code}), 请检查 AssetRipper 控制台")
             
             except requests.exceptions.ConnectionError:
-                self.after(0, messagebox.showinfo, "下载成功", f"{name} 下载完成\n\nAssetRipper 未运行, 跳过自动解包")
+                self.after(0, messagebox.showinfo, "下载成功", f"{name} 下载完成\n\nAssetRipper 未运行, 跳过调用")
             except Exception as e:
-                self.after(0, messagebox.showerror, "解包错误", f"{e}")
+                self.after(0, messagebox.showerror, "AssetRipper 调用错误", f"{e}")
 
         threading.Thread(target=api_task, daemon=True).start()
 
