@@ -7,8 +7,7 @@ import time
 import os
 
 API_URL = "https://api.vrchat.cloud/api/1/files"
-USER_AGENT = "VRChatVRCADownloader/1.1"
-RIPPER_API = "http://127.0.0.1:56761"
+USER_AGENT = "VRChatVRCADownloader/1.2"
 
 class VRChatAPI:
     @staticmethod
@@ -54,13 +53,16 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("VRChat VRCA Downloader")
-        self.geometry("930x700")
+        self.geometry("1040x700")
         
-        self.minsize(915, 500)
+        self.minsize(1025, 500)
 
         self.cookie_var = tk.StringVar()
         self.search_var = tk.StringVar()
         self.auto_rip_var = tk.BooleanVar(value=False)
+
+        self.rip_port_var = tk.StringVar(value="")
+        self.vcmd = (self.register(self._validate_port), '%P')
 
         self.all_avatars = []
         self.is_downloading = False
@@ -88,6 +90,16 @@ class App(tk.Tk):
 
         self.check_rip = ttk.Checkbutton(top, text="下载后自动解包", variable=self.auto_rip_var)
         self.check_rip.pack(side="left", padx=5)
+
+        ttk.Label(top, text="端口:").pack(side="left", padx=(5, 0))
+        self.port_entry = ttk.Entry(
+            top, 
+            textvariable=self.rip_port_var, 
+            width=8,
+            validate="key", 
+            validatecommand=self.vcmd
+        )
+        self.port_entry.pack(side="left", padx=5)
 
         ttk.Button(top, text="关于软件", width=10, command=self.show_about).pack(side="left", padx=5)
 
@@ -131,7 +143,7 @@ class App(tk.Tk):
 
     def show_about(self):
         about_text = (
-            "VRChat VRCA Downloader v1.1\n"
+            "VRChat VRCA Downloader v1.2\n"
 
             "\n作者: PuddingKC\n"
             "GitHub: github.com/Null-K/VRChatVRCADownloader\n"
@@ -267,18 +279,29 @@ class App(tk.Tk):
             self.tree.move(k, "", index)
         self.tree.heading(col, command=lambda: self._sort_column(col, not reverse))
 
+    def _validate_port(self, P):
+        if P == "": return True
+        return P.isdigit() and len(P) <= 5
+
     def _trigger_assetripper(self, vrca_path, name):
         output_dir = os.path.splitext(vrca_path)[0] 
         if not os.path.exists(output_dir): os.makedirs(output_dir)
 
+        current_port = self.rip_port_var.get().strip()
+        if not current_port:
+            self.after(0, messagebox.showinfo, "下载成功", f"{name} 下载完成\n\nAssetRipper 软件端口未填写, 跳过自动解包")
+            return
+
+        dynamic_ripper_api = f"http://127.0.0.1:{current_port}"
+
         def api_task():
             self.after(0, self.status_title.config, {"text": "正在向 AssetRipper 发送解包请求..."})
             try:
-                try: requests.post(f"{RIPPER_API}/Reset", timeout=2)
+                try: requests.post(f"{dynamic_ripper_api}/Reset", timeout=2)
                 except: pass
 
-                requests.post(f"{RIPPER_API}/LoadFile", data={'path': vrca_path}, timeout=5)
-                res = requests.post(f"{RIPPER_API}/Export/UnityProject", data={'path': output_dir}, timeout=15)
+                requests.post(f"{dynamic_ripper_api}/LoadFile", data={'path': vrca_path}, timeout=20)
+                res = requests.post(f"{dynamic_ripper_api}/Export/UnityProject", data={'path': output_dir}, timeout=30)
                 
                 if 200 <= res.status_code < 400:
                     self.after(0, messagebox.showinfo, "下载成功", f"{name} 下载完成\n\n自动解包请求已发送, 目录: {output_dir}")
