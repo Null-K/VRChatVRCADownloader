@@ -9,7 +9,7 @@
 ## 软件亮点
 - 完全合规：使用 `Auth Cookie` 进行身份验证，不保存用户密码，所有请求均通过 VRChat 官方 API 接口完成。
 - 模型同步：一键获取账号下所有已上传的 Avatar 列表，仅显示每个模型的最新版本，支持名称搜索。
-- 自动解包：可在下载完成后，调用已安装的 AssetRipper 对文件进行解包（需用户自行配置）。
+- 自动解析：可在下载完成后，调用已安装的 AssetRipper 对文件进行解析（需用户自行配置）。
 
 ## 使用方法
 1. 下载并运行 [vrchat_vrca_downloader.exe](https://github.com/Null-K/VRChatVRCADownloader/blob/main/build/vrchat_vrca_downloader.exe)
@@ -20,7 +20,7 @@
 4. 点击 ``获取模型`` 按钮刷新列表
 
 ## 注意事项
-- 使用自动解包功能前，需要用户自行下载、安装并运行 [AssetRipper](https://github.com/AssetRipper/AssetRipper/releases) 。
+- 使用自动调用功能前，需要用户自行下载、安装并运行 [AssetRipper](https://github.com/AssetRipper/AssetRipper/releases) 。
 - 安装完成后，启动 AssetRipper ，并将控制台输出的端口填入软件中。
 
 ## 免责声明
