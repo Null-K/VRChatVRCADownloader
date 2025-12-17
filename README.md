@@ -21,6 +21,7 @@
 
 ## 注意事项
 - 使用自动解包功能前，需要用户自行下载、安装并运行 [AssetRipper](https://github.com/AssetRipper/AssetRipper/releases) 。
+- 安装完成后，启动 AssetRipper ，并将控制台输出的端口填入软件中。
 
 ## 免责声明
 本工具为第三方辅助工具，仅用于个人账号资产的管理与下载。  
