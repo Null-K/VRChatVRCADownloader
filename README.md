@@ -19,6 +19,9 @@
 
 4. 点击 ``获取模型`` 按钮刷新列表
 
+## VRC 交流群
+1047423396
+
 ## 注意事项
 - 自动调用 AssetRipper
   - 使用自动调用功能前，需要用户自行下载、安装并运行 [AssetRipper](https://github.com/AssetRipper/AssetRipper/releases) 。
