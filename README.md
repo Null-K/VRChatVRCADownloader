@@ -1,7 +1,14 @@
+> # 严禁将本工具用于任何恶意用途！
+> **本工具旨在帮助你找回丢失的资产。**  
+**请不要请求或修改本工具，用于窃取不属于你自己的资产！**
+
 # VRChat VRCA Downloader
 
 **VRChat VRCA Downloader** 是用于下载本人 VRChat 账号下 Avatar `.vrca` 文件的桌面工具。  
 通过 VRChat 官方 API 获取模型列表，不保存账号密码。
+
+> 若您觉得桌面版使用较为繁琐，也可以选择安装 Chrome 浏览器插件版本：  
+> https://github.com/Null-K/VRChatVRCADownloader-Chrome
 
 <p align="center">
   <img src="images/main.png" width="760">
@@ -36,11 +43,11 @@
 
 ## 使用方法
 
-1. 运行 `build/vrchat_vrca_downloader.exe`。
+1. 运行 `build/vrchat_vrca_downloader.exe`
 2. 获取登录态（任选其一）：
    - 在 `Cookie:` 输入框手动粘贴 `auth=...;`
    - 点击 `内置登录`，登录后等待自动填入 `auth`
-3. 点击 `获取模型` 同步列表。
+3. 点击 `获取模型` 同步列表
 4. 选择模型并下载：
    - 双击单行可单独下载
    - 使用 `选择` 列 + `全选/取消全选` 后点击 `批量下载选中项`
