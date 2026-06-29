@@ -7,6 +7,76 @@ use tauri::Manager;
 
 type AnyResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
+// ── 设备绑定加密 ──────────────────────────────────────────────────────────────
+
+/// 获取设备唯一标识字符串
+#[cfg(windows)]
+fn device_id() -> String {
+    use wmi::{COMLibrary, WMIConnection};
+    use std::collections::HashMap;
+
+    fn query_field(class: &str, field: &str) -> String {
+        let com = match COMLibrary::new() { Ok(c) => c, Err(_) => return String::new() };
+        let conn = match WMIConnection::new(com) { Ok(c) => c, Err(_) => return String::new() };
+        let results: Vec<HashMap<String, wmi::Variant>> = match conn.raw_query(
+            format!("SELECT {} FROM {}", field, class)
+        ) { Ok(r) => r, Err(_) => return String::new() };
+        match results.first().and_then(|r| r.get(field)) {
+            Some(wmi::Variant::String(s)) => s.trim().to_string(),
+            _ => String::new(),
+        }
+    }
+
+    let board = query_field("Win32_BaseBoard", "SerialNumber");
+    let cpu   = query_field("Win32_Processor", "ProcessorId");
+    format!("{}:{}", board, cpu)
+}
+
+#[cfg(not(windows))]
+fn device_id() -> String {
+    // 非 Windows 平台降级，用主机名
+    hostname::get()
+        .map(|h| h.to_string_lossy().to_string())
+        .unwrap_or_else(|_| "fallback-device".to_string())
+}
+
+fn derive_key() -> [u8; 32] {
+    use sha2::{Sha256, Digest};
+    let id = device_id();
+
+    let mut h = Sha256::new();
+    h.update(b"vrca-downloader-session-v1:");
+    h.update(id.as_bytes());
+    h.finalize().into()
+}
+
+/// AES-256-GCM 加密，返回 [nonce(12) || ciphertext]
+fn encrypt(plaintext: &[u8]) -> Result<Vec<u8>, String> {
+    use aes_gcm::{Aes256Gcm, Key, Nonce, aead::{Aead, KeyInit, OsRng, rand_core::RngCore}};
+    let key = derive_key();
+    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key));
+    let mut nonce_bytes = [0u8; 12];
+    OsRng.fill_bytes(&mut nonce_bytes);
+    let nonce = Nonce::from_slice(&nonce_bytes);
+    let ciphertext = cipher.encrypt(nonce, plaintext).map_err(|e| e.to_string())?;
+    let mut out = nonce_bytes.to_vec();
+    out.extend(ciphertext);
+    Ok(out)
+}
+
+/// AES-256-GCM 解密
+fn decrypt(data: &[u8]) -> Result<Vec<u8>, String> {
+    use aes_gcm::{Aes256Gcm, Key, Nonce, aead::{Aead, KeyInit}};
+    if data.len() < 12 {
+        return Err("数据过短".to_string());
+    }
+    let (nonce_bytes, ciphertext) = data.split_at(12);
+    let key = derive_key();
+    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key));
+    let nonce = Nonce::from_slice(nonce_bytes);
+    cipher.decrypt(nonce, ciphertext).map_err(|_| "解密失败：文件可能来自其他设备".to_string())
+}
+
 const USER_AGENT: &str = "VRChatVRCADownloader/2.0";
 const AUTH_URL: &str = "https://api.vrchat.cloud/api/1/auth/user";
 const FILES_URL: &str = "https://api.vrchat.cloud/api/1/files";
@@ -405,7 +475,7 @@ struct SessionFile {
 }
 
 fn session_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
-    Ok(app.path().app_data_dir().map_err(|e| e.to_string())?.join("session.json"))
+    Ok(app.path().app_data_dir().map_err(|e| e.to_string())?.join("session.bin"))
 }
 
 // 保存登录会话到磁盘
@@ -421,18 +491,19 @@ pub async fn cmd_save_session(
     };
     if auth_cookie.is_empty() { return Ok(()); }
 
-    let session = SessionFile {
-        auth_cookie,
-        proxy,
-        display_name,
-        saved_at: chrono::Utc::now().timestamp(),
-    };
-    let json = serde_json::to_string(&session).map_err(|e| e.to_string())?;
+    let session = SessionFile { auth_cookie, proxy, display_name, saved_at: chrono::Utc::now().timestamp() };
+    let json = serde_json::to_vec(&session).map_err(|e| e.to_string())?;
+    let encrypted = encrypt(&json)?;
+
     let path = session_path(&app)?;
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent).await.map_err(|e| e.to_string())?;
     }
-    tokio::fs::write(&path, json).await.map_err(|e| e.to_string())?;
+    // 同时清理旧的明文 session.json
+    let old = path.with_extension("json");
+    let _ = tokio::fs::remove_file(&old).await;
+
+    tokio::fs::write(&path, encrypted).await.map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -443,13 +514,23 @@ pub async fn cmd_restore_session(
     state: tauri::State<'_, Mutex<AuthState>>,
 ) -> Result<String, String> {
     let path = session_path(&app)?;
-    let json = match tokio::fs::read_to_string(&path).await {
-        Ok(s) => s,
-        Err(_) => return Ok(String::new()),
+    let raw = match tokio::fs::read(&path).await {
+        Ok(b) => b,
+        Err(_) => {
+            // 兼容旧版明文 session.json：尝试读取并迁移
+            let old = path.with_extension("json");
+            match tokio::fs::read_to_string(&old).await {
+                Ok(s) => s.into_bytes(),
+                Err(_) => return Ok(String::new()),
+            }
+        }
     };
-    let session: SessionFile = match serde_json::from_str(&json) {
+
+    // 尝试解密；若解密失败说明是旧版明文，直接当 JSON 处理
+    let json_bytes = decrypt(&raw).unwrap_or_else(|_| raw.clone());
+    let session: SessionFile = match serde_json::from_slice(&json_bytes) {
         Ok(s) => s,
-        Err(_) => return Ok(String::new()),
+        Err(_) => { let _ = tokio::fs::remove_file(&path).await; return Ok(String::new()); }
     };
 
     // 超过 30 天视为过期
@@ -469,33 +550,31 @@ pub async fn cmd_restore_session(
         .map_err(|e| e.to_string())?;
 
     if resp.status() != 200 {
-        // Cookie 已失效，删除本地文件
         let _ = tokio::fs::remove_file(&path).await;
         return Ok(String::new());
     }
 
     let payload: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-
-    // 需要重新 2FA 或响应异常
-    if payload.get("requiresTwoFactorAuth").is_some()
-        || payload.get("id").is_none()
-    {
+    if payload.get("requiresTwoFactorAuth").is_some() || payload.get("id").is_none() {
         let _ = tokio::fs::remove_file(&path).await;
         return Ok(String::new());
     }
 
-    // 取最新显示名
     let display_name = payload
-        .get("displayName")
-        .and_then(|v| v.as_str())
-        .unwrap_or(&session.display_name)
-        .to_string();
+        .get("displayName").and_then(|v| v.as_str())
+        .unwrap_or(&session.display_name).to_string();
 
-    // 写入运行时状态
     {
         let mut s = state.lock().unwrap();
         s.auth_cookie = session.auth_cookie;
         s.proxy = session.proxy;
+    }
+
+    // 如果当前读到的是旧版明文，重新加密保存一次完成迁移
+    if decrypt(&raw).is_err() {
+        let _ = cmd_save_session(display_name.clone(), app.clone(), state).await;
+        let old = path.with_extension("json");
+        let _ = tokio::fs::remove_file(&old).await;
     }
 
     Ok(display_name)
@@ -506,6 +585,9 @@ pub async fn cmd_restore_session(
 pub async fn cmd_clear_session(app: tauri::AppHandle) -> Result<(), String> {
     let path = session_path(&app)?;
     let _ = tokio::fs::remove_file(&path).await;
+    // 同时清理旧版明文文件
+    let old = path.with_extension("json");
+    let _ = tokio::fs::remove_file(&old).await;
     Ok(())
 }
 
