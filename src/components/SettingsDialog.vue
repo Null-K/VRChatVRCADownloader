@@ -8,7 +8,7 @@
           <span class="field-label">网络代理</span>
           <input :value="proxy" @input="$emit('update:proxy', ($event.target as HTMLInputElement).value)"
                  class="field-input" placeholder="http://127.0.0.1:7890" />
-          <span class="field-hint">留空表示直连。格式：http://host:port</span>
+          <span class="field-hint">留空表示直连，格式：http://host:port</span>
         </label>
 
         <label class="field">
