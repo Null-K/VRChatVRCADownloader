@@ -1,0 +1,46 @@
+/* ── 全局重置 ─────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:       #0f0f0f;   /* 主背景 */
+  --mantle:   #141414;   /* 顶栏/侧栏背景 */
+  --crust:    #0a0a0a;   /* 最深背景 */
+  --surface0: #1c1c1c;   /* 卡片背景 */
+  --surface1: #242424;   /* 边框 */
+  --surface2: #2e2e2e;   /* 次要边框/hover */
+  --overlay0: #4a4a4a;   /* 占位/禁用文字 */
+  --overlay1: #666666;   /* 次要文字 */
+  --text:     #e8e8e8;   /* 主文字 */
+  --subtext0: #a0a0a0;   /* 次文字 */
+  --subtext1: #808080;   /* 更淡文字 */
+  --lavender: #c8c8c8;   /* 浅灰强调 */
+  --accent:   #ffffff;   /* 主强调色 */
+  --accent2:  #b0b0b0;   /* 次强调 */
+  --green:    #8aad8a;   /* 成功 */
+  --yellow:   #b8a870;   /* 警告 */
+  --red:      #c47070;   /* 错误 */
+  --peach:    #b08060;   /* 橙色 */
+  --teal:     #d4d4d4;   /* 青灰 */
+
+  --radius:    8px;
+  --radius-sm: 5px;
+  --shadow:    0 8px 32px rgba(0,0,0,0.7);
+  --shadow-sm: 0 2px 10px rgba(0,0,0,0.5);
+
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-size: 14px;
+  color: var(--text);
+  background: var(--bg);
+}
+
+html, body, #app { height: 100%; overflow: hidden; }
+
+/* ── 滚动条 ─────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--surface2); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: var(--overlay0); }
+
+/* ── 通用工具 ──────────────────────────────────────────────────── */
+.truncate { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.flex-center { display: flex; align-items: center; justify-content: center; }
