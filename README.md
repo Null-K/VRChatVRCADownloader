@@ -8,7 +8,7 @@
 # VRChat VRCA Downloader
 
 **VRChat VRCA Downloader** 是用于下载本人 VRChat 账号下 Avatar `.vrca` 文件的桌面工具。  
-通过 VRChat 官方 API 获取模型列表，账号凭据仅在本地缓存，不上传至任何第三方。
+通过 VRChat 官方 API 获取模型列表，账号凭据仅在本地加密存储，不上传至任何第三方。
 
 <p align="center">
   <img src="main.png" width="760">
