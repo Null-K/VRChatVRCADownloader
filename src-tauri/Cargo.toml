@@ -1,6 +1,6 @@
 [package]
 name = "vrchat-vrca-downloader"
-version = "2.0.0"
+version = "2.0.1"
 description = "VRChat VRCA Downloader"
 authors = ["PuddingKC"]
 edition = "2021"

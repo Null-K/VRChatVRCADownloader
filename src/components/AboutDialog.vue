@@ -51,13 +51,18 @@
 </template>
 
 <script setup lang="ts">
+import { ref, onMounted } from 'vue'
+import { getVersion } from '@tauri-apps/api/app'
 import { open } from '@tauri-apps/plugin-shell'
 import SvgIcon from './SvgIcon.vue'
 import IconExternal from '../icons/external.svg?raw'
 
 defineEmits<{ close: [] }>()
 
-const version = '2.0.0'
+const version = ref('')
+onMounted(async () => {
+  version.value = await getVersion()
+})
 
 async function openUrl(url: string) {
   await open(url)
