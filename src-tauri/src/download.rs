@@ -223,7 +223,8 @@ async fn do_download(
 ) -> Result<(), String> {
     let mut builder = Client::builder()
         .user_agent(USER_AGENT)
-        .timeout(Duration::from_secs(30));
+        .connect_timeout(Duration::from_secs(20))
+        .read_timeout(Duration::from_secs(STALL_SECS));
     if let Some(p) = proxy {
         builder = builder.proxy(reqwest::Proxy::all(p).map_err(|e| e.to_string())?);
     }
