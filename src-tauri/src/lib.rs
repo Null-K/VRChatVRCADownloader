@@ -12,6 +12,14 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .setup(|app| {
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                api::cleanup_cache(&handle).await;
+            });
+            Ok(())
+        })
         .manage(Mutex::new(AuthState::default()))
         .manage(DownloadManager::new())
         .invoke_handler(tauri::generate_handler![

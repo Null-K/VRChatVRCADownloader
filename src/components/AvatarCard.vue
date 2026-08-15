@@ -1,5 +1,5 @@
 <template>
-  <div class="card" :class="{ selected }" @click="$emit('click')">
+  <div class="card" :class="{ selected }" :data-id="avatar.file_id" @click="$emit('click')">
     <div class="card-thumb">
       <img v-if="thumbSrc" :src="thumbSrc" class="thumb-img" :alt="avatar.short_name" />
       <div v-else class="thumb-placeholder flex-center">

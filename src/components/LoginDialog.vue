@@ -41,7 +41,8 @@
           <label class="field">
             <span class="field-label">验证码</span>
             <input v-model="code" class="field-input code-input"
-                   placeholder="000000" maxlength="8"
+                   placeholder="000000" maxlength="6" inputmode="numeric"
+                   @input="code = code.replace(/\D/g, '').slice(0, 6)"
                    @keyup.enter="do2fa" ref="codeRef" />
           </label>
         </div>
@@ -187,6 +188,8 @@ async function do2fa() {
   font-size: 20px; letter-spacing: 8px; text-align: center;
   font-family: 'Courier New', monospace;
 }
+.code-input::-webkit-outer-spin-button,
+.code-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 
 .err-msg { color: var(--red); font-size: 11px; margin: 6px 0; }
 

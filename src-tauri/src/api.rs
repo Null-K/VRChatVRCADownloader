@@ -413,6 +413,28 @@ pub async fn cmd_fetch_avatars(
     Ok(avatars)
 }
 
+// 删除修改时间超过 20 天的缓存文件
+pub async fn cleanup_cache(app: &tauri::AppHandle) {
+    let dir = match app.path().app_data_dir() {
+        Ok(d) => d.join("img_cache"),
+        Err(_) => return,
+    };
+    let cutoff = std::time::SystemTime::now() - std::time::Duration::from_secs(20 * 86400);
+    let mut entries = match tokio::fs::read_dir(&dir).await {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let Ok(meta) = entry.metadata().await else { continue };
+        if !meta.is_file() { continue; }
+        if let Ok(modified) = meta.modified() {
+            if modified < cutoff {
+                let _ = tokio::fs::remove_file(entry.path()).await;
+            }
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn cmd_fetch_image_bytes(
     url: String,

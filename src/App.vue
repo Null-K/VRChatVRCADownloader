@@ -1,5 +1,5 @@
 <template>
-  <div class="app-shell">
+  <div class="app-shell" @contextmenu.prevent="onCtx">
     <!-- 顶栏 -->
     <header class="topbar">
       <div class="topbar-left">
@@ -89,6 +89,14 @@
       @clear="clearFinished"
     />
 
+    <!-- 自定义右键菜单 -->
+    <div v-if="ctxMenu.visible" class="ctx-menu"
+         :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
+         @contextmenu.prevent.stop @click.stop>
+      <button v-for="(item, i) in ctxMenu.items" :key="i"
+              class="ctx-item" @click="ctxRun(item)">{{ item.label }}</button>
+    </div>
+
     <!-- 弹窗 -->
     <LoginDialog v-if="showLogin" :proxy="proxy" @close="showLogin=false" @logged-in="onLoggedIn" />
     <SettingsDialog v-if="showSettings" v-model:proxy="proxy"
@@ -103,6 +111,7 @@ import { ref, computed, onMounted, onUnmounted, provide } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { save as dialogSave } from '@tauri-apps/plugin-dialog'
+import { readText, writeText } from '@tauri-apps/plugin-clipboard-manager'
 import AvatarCard from './components/AvatarCard.vue'
 import DetailPanel from './components/DetailPanel.vue'
 import TaskList from './components/TaskList.vue'
@@ -178,6 +187,44 @@ const selectedAvatar = computed(() =>
   allAvatars.value.find(av => av.file_id === selectedId.value) ?? null
 )
 
+// ── 自定义右键菜单 ──────────────────────────────────────────────────────────
+interface CtxItem { label: string; run: () => void }
+const ctxMenu = ref<{ visible: boolean; x: number; y: number; items: CtxItem[] }>(
+  { visible: false, x: 0, y: 0, items: [] }
+)
+
+function closeCtx() { ctxMenu.value.visible = false }
+
+function onCtx(e: MouseEvent) {
+  const target = e.target as HTMLElement
+  const items: CtxItem[] = []
+  const card = target.closest('.card') as HTMLElement | null
+  if (card) {
+    const av = allAvatars.value.find(a => a.file_id === card.dataset.id)
+    if (av) {
+      items.push({ label: '复制名称', run: () => writeText(av.short_name) })
+      items.push({ label: '复制链接', run: () => writeText(av.url) })
+    }
+  } else if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+    const el = target
+    items.push({ label: '复制', run: () => {
+      const s = el.selectionStart ?? 0, e = el.selectionEnd ?? 0
+      writeText(s !== e ? el.value.slice(s, e) : el.value)
+    } })
+    items.push({ label: '粘贴', run: () => {
+      readText().then(t => {
+        const s = el.selectionStart ?? el.value.length, e = el.selectionEnd ?? el.value.length
+        el.value = el.value.slice(0, s) + t + el.value.slice(e)
+        el.dispatchEvent(new Event('input'))
+      }).catch(() => {})
+    } })
+  }
+  if (!items.length) return
+  ctxMenu.value = { visible: true, x: e.clientX, y: e.clientY, items }
+}
+
+function ctxRun(item: CtxItem) { item.run(); closeCtx() }
+
 // ── lifecycle ──────────────────────────────────────────────────────────────
 onMounted(async () => {
   unlistenProgress = await listen<string>('fetch-progress', e => { statusMsg.value = e.payload })
@@ -189,6 +236,11 @@ onMounted(async () => {
   unlistenRemove = await listen<number>('task-removed', e => {
     tasks.value = tasks.value.filter(t => t.id !== e.payload)
   })
+  // 右键菜单
+  window.addEventListener('click', closeCtx)
+  window.addEventListener('blur', closeCtx)
+  window.addEventListener('keydown', closeCtx)
+  window.addEventListener('scroll', closeCtx, true)
   // 恢复任务列表
   try {
     const saved = await invoke<TaskSnapshot[]>('cmd_get_tasks')
@@ -214,6 +266,10 @@ onUnmounted(() => {
   unlistenProgress?.()
   unlistenTask?.()
   unlistenRemove?.()
+  window.removeEventListener('click', closeCtx)
+  window.removeEventListener('blur', closeCtx)
+  window.removeEventListener('keydown', closeCtx)
+  window.removeEventListener('scroll', closeCtx, true)
 })
 
 // ── methods ────────────────────────────────────────────────────────────────
@@ -413,6 +469,23 @@ async function clearFinished() {
   background: var(--mantle);
 }
 .detail-empty { height: 100%; color: var(--overlay0); font-size: 13px; }
+
+/* ── Context menu ───────────────────────────────────────────────── */
+.ctx-menu {
+  position: fixed; z-index: 9999; min-width: 130px;
+  background: var(--surface0);
+  border: 1px solid var(--surface2);
+  border-radius: var(--radius-sm);
+  padding: 4px;
+  box-shadow: var(--shadow);
+}
+.ctx-item {
+  display: block; width: 100%; text-align: left;
+  padding: 6px 10px; font-size: 12px; color: var(--text);
+  background: none; border: none; border-radius: 4px;
+  cursor: pointer; font-family: inherit;
+}
+.ctx-item:hover { background: var(--surface1); color: var(--accent); }
 
 /* ── Spinners ───────────────────────────────────────────────────── */
 .spinner {
