@@ -16,7 +16,7 @@
 </p>
 
 <p align="center">
-  <a href="https://afdian.com/a/puddingkc">
+  <a href="https://afdian.com/a/puddingkc" target="_blank">
     <img width="150" src="https://pic1.afdiancdn.com/static/img/welcome/button-sponsorme.png" alt="在爱发电支持我">
   </a>
 </p>
