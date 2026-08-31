@@ -15,6 +15,12 @@
   <img src="https://img.shields.io/github/license/Null-K/VRChatVRCADownloader?style=flat" alt="License">
 </p>
 
+<p align="center">
+  <a href="https://afdian.com/a/puddingkc">
+    <img width="150" src="https://pic1.afdiancdn.com/static/img/welcome/button-sponsorme.png" alt="在爱发电支持我">
+  </a>
+</p>
+
 ## 软件简介
 
 **VRChat VRCA Downloader** 是用于下载本人 VRChat 账号下 Avatar `.vrca` 文件的桌面工具。  
