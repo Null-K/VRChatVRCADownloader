@@ -11,6 +11,7 @@ use tauri::Emitter;
 use tokio::{fs, io::AsyncWriteExt};
 
 use crate::api::AuthState;
+use crate::logger;
 
 const USER_AGENT: &str = "VRChatVRCADownloader/2.0";
 const STALL_SECS: u64 = 25;
@@ -104,9 +105,7 @@ fn resolve_path(path: &str) -> String {
     candidate
 }
 
-#[allow(dead_code)]
-fn format_bytes(n: u64) -> String {
-    if n < 1024 { return format!("{} B", n); }
+fn format_bytes(n: u64) -> String {    if n < 1024 { return format!("{} B", n); }
     if n < 1024 * 1024 { return format!("{:.1} KB", n as f64 / 1024.0); }
     if n < 1024 * 1024 * 1024 { return format!("{:.1} MB", n as f64 / 1024.0 / 1024.0); }
     format!("{:.2} GB", n as f64 / 1024.0 / 1024.0 / 1024.0)
@@ -136,6 +135,9 @@ pub async fn cmd_start_download(
     };
 
     let final_path = resolve_path(&save_path);
+    if final_path != save_path {
+        logger::info(&format!("保存路径已存在，自动重命名: {} -> {}", save_path, final_path));
+    }
     let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
 
     {
@@ -153,6 +155,11 @@ pub async fn cmd_start_download(
             cancel_tx: Some(cancel_tx),
         });
     }
+
+    logger::info(&format!(
+        "创建下载任务 #{}: {} (保存至 {})",
+        task_id, name, final_path
+    ));
 
     emit_task(&window, &dm, task_id);
 
@@ -228,7 +235,12 @@ async fn do_download(
     if let Some(p) = proxy {
         builder = builder.proxy(reqwest::Proxy::all(p).map_err(|e| e.to_string())?);
     }
-    let client = builder.build().map_err(|e| e.to_string())?;
+    let client = builder.build().map_err(|e| {
+        logger::error(&format!("任务 #{} 创建 HTTP 客户端失败: {}", task_id, e));
+        e.to_string()
+    })?;
+
+    logger::info(&format!("任务 #{} 请求下载: {}", task_id, url));
 
     let resp = client
         .get(url)
@@ -236,27 +248,44 @@ async fn do_download(
             header::HeaderValue::from_str(auth_cookie).unwrap_or_else(|_| header::HeaderValue::from_static("")))
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            logger::error(&format!("任务 #{} 网络请求失败: {}", task_id, e));
+            e.to_string()
+        })?;
 
     if resp.status() == 401 {
+        logger::warn(&format!("任务 #{} 下载失败：登录已过期 (HTTP 401)", task_id));
         return Err("登录已过期，请重新登录".to_string());
     }
     if !resp.status().is_success() {
+        logger::warn(&format!("任务 #{} 下载失败: HTTP {}", task_id, resp.status()));
         return Err(format!("HTTP {}", resp.status()));
     }
 
     let total = resp.content_length().unwrap_or(0);
+    logger::info(&format!(
+        "任务 #{} 服务器响应 {}，文件大小 {}",
+        task_id,
+        resp.status(),
+        if total > 0 { format_bytes(total) } else { "未知".to_string() }
+    ));
     {
         let mut tasks = dm.tasks.lock().unwrap();
         if let Some(t) = tasks.get_mut(&task_id) { t.total = total; }
     }
 
     if let Some(parent) = std::path::Path::new(save_path).parent() {
-        fs::create_dir_all(parent).await.map_err(|e| e.to_string())?;
+        fs::create_dir_all(parent).await.map_err(|e| {
+            logger::error(&format!("任务 #{} 创建保存目录失败 ({}): {}", task_id, parent.display(), e));
+            e.to_string()
+        })?;
     }
 
     let temp_path = format!("{}.part", save_path);
-    let mut file = fs::File::create(&temp_path).await.map_err(|e| e.to_string())?;
+    let mut file = fs::File::create(&temp_path).await.map_err(|e| {
+        logger::error(&format!("任务 #{} 创建临时文件失败 ({}): {}", task_id, temp_path, e));
+        e.to_string()
+    })?;
     let mut stream = resp.bytes_stream();
 
     let mut downloaded: u64 = 0;
@@ -269,6 +298,7 @@ async fn do_download(
             _ = &mut *cancel_rx => {
                 drop(file);
                 let _ = fs::remove_file(&temp_path).await;
+                logger::info(&format!("任务 #{} 已被用户取消", task_id));
                 let mut tasks = dm.tasks.lock().unwrap();
                 if let Some(t) = tasks.get_mut(&task_id) {
                     t.status = TaskStatus::Cancelled;
@@ -282,6 +312,7 @@ async fn do_download(
                     Some(Err(e)) => {
                         drop(file);
                         let _ = fs::remove_file(&temp_path).await;
+                        logger::error(&format!("任务 #{} 下载中断: {}", task_id, e));
                         return Err(e.to_string());
                     }
                     Some(Ok(bytes)) => {
@@ -289,6 +320,7 @@ async fn do_download(
                             if last_progress.elapsed().as_secs() >= STALL_SECS {
                                 drop(file);
                                 let _ = fs::remove_file(&temp_path).await;
+                                logger::warn(&format!("任务 #{} 连续 {}s 无进度，自动终止", task_id, STALL_SECS));
                                 let mut tasks = dm.tasks.lock().unwrap();
                                 if let Some(t) = tasks.get_mut(&task_id) {
                                     t.status = TaskStatus::Timeout;
@@ -298,7 +330,10 @@ async fn do_download(
                             }
                             continue;
                         }
-                        file.write_all(&bytes).await.map_err(|e| e.to_string())?;
+                        file.write_all(&bytes).await.map_err(|e| {
+                            logger::error(&format!("任务 #{} 写入文件失败: {}", task_id, e));
+                            e.to_string()
+                        })?;
                         downloaded += bytes.len() as u64;
                         last_progress = Instant::now();
                         let elapsed = start.elapsed().as_secs_f64().max(0.001);
@@ -320,9 +355,22 @@ async fn do_download(
         }
     }
 
-    file.flush().await.map_err(|e| e.to_string())?;
+    file.flush().await.map_err(|e| {
+        logger::error(&format!("任务 #{} 刷新文件缓冲失败: {}", task_id, e));
+        e.to_string()
+    })?;
     drop(file);
-    fs::rename(&temp_path, save_path).await.map_err(|e| e.to_string())?;
+    fs::rename(&temp_path, save_path).await.map_err(|e| {
+        logger::error(&format!("任务 #{} 保存文件失败 ({} -> {}): {}", task_id, temp_path, save_path, e));
+        e.to_string()
+    })?;
+
+    logger::info(&format!(
+        "任务 #{} 下载完成: {} (耗时 {:.1}s)",
+        task_id,
+        save_path,
+        start.elapsed().as_secs_f64()
+    ));
 
     {
         let mut tasks = dm.tasks.lock().unwrap();
@@ -353,11 +401,13 @@ pub async fn cmd_cancel_task(
             TaskStatus::Queued => {
                 t.status = TaskStatus::Cancelled;
                 t.error = "用户手动终止".to_string();
+                logger::info(&format!("任务 #{} 已取消（尚未开始）", id));
                 let snap = t.snapshot();
                 drop(tasks);
                 let _ = window.emit("task-updated", snap);
             }
             TaskStatus::Running => {
+                logger::info(&format!("任务 #{} 收到取消请求", id));
                 if let Some(tx) = t.cancel_tx.take() {
                     let _ = tx.send(());
                 }
@@ -392,6 +442,9 @@ pub async fn cmd_cancel_all(
         }
     }
     drop(tasks);
+    if count > 0 {
+        logger::info(&format!("批量取消 {} 个任务", count));
+    }
     for s in snaps { let _ = window.emit("task-updated", s); }
     Ok(count)
 }
@@ -411,6 +464,9 @@ pub async fn cmd_retry_failed(
     };
 
     let count = retry_ids.len() as u32;
+    if count > 0 {
+        logger::info(&format!("重试 {} 个失败任务", count));
+    }
     let (auth_cookie, proxy) = {
         let s = auth_state.lock().unwrap();
         (s.auth_cookie.clone(), s.proxy.clone())
@@ -485,6 +541,9 @@ pub async fn cmd_clear_finished(
         for id in &ids { tasks.remove(id); }
         ids
     };
+    if !removed.is_empty() {
+        logger::info(&format!("清除 {} 条已完成任务记录", removed.len()));
+    }
     for id in removed {
         let _ = window.emit("task-removed", id);
     }

@@ -5,6 +5,8 @@ use std::sync::Mutex;
 use tauri::Emitter;
 use tauri::Manager;
 
+use crate::logger;
+
 type AnyResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 // ── 设备绑定加密 ──────────────────────────────────────────────────────────────
@@ -185,17 +187,25 @@ pub async fn cmd_login(
     proxy: Option<String>,
     state: tauri::State<'_, Mutex<AuthState>>,
 ) -> Result<LoginResult, String> {
+    logger::info(&format!("尝试登录: {}", username));
     let cred = B64.encode(format!("{}:{}", username, password));
-    let client = build_client(&proxy).map_err(|e| e.to_string())?;
+    let client = build_client(&proxy).map_err(|e| {
+        logger::error(&format!("登录失败：HTTP 客户端创建失败（请检查代理设置）: {}", e));
+        e.to_string()
+    })?;
 
     let resp = client
         .get(AUTH_URL)
         .header(header::AUTHORIZATION, format!("Basic {}", cred))
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            logger::error(&format!("登录失败：网络请求错误: {}", e));
+            e.to_string()
+        })?;
 
     if resp.status() == 401 {
+        logger::warn("登录失败：用户名或密码错误 (HTTP 401)");
         return Ok(LoginResult {
             success: false,
             requires_2fa: false,
@@ -219,7 +229,10 @@ pub async fn cmd_login(
             }
         });
 
-    let payload: AuthUserPayload = resp.json().await.map_err(|e| e.to_string())?;
+    let payload: AuthUserPayload = resp.json().await.map_err(|e| {
+        logger::error(&format!("登录失败：解析响应失败: {}", e));
+        e.to_string()
+    })?;
 
     // 检查 2FA
     let requires_2fa = payload.requires_two_factor_auth.as_ref().map_or(false, |v| {
@@ -238,6 +251,7 @@ pub async fn cmd_login(
         .unwrap_or_default();
 
     let Some(auth_val) = auth_value else {
+        logger::warn("登录失败：响应中未包含 auth cookie");
         return Ok(LoginResult {
             success: false,
             requires_2fa: false,
@@ -256,6 +270,7 @@ pub async fn cmd_login(
     }
 
     if requires_2fa {
+        logger::info(&format!("需要两步验证 (方式: {})", fa_methods.join(", ")));
         return Ok(LoginResult {
             success: false,
             requires_2fa: true,
@@ -264,6 +279,7 @@ pub async fn cmd_login(
         });
     }
 
+    logger::info("登录成功");
     Ok(LoginResult {
         success: true,
         requires_2fa: false,
@@ -284,7 +300,11 @@ pub async fn cmd_verify_2fa(
     };
 
     let url = if method == "emailotp" { EMAIL_OTP_URL } else { TOTP_URL };
-    let client = build_client(&proxy).map_err(|e| e.to_string())?;
+    logger::info(&format!("提交两步验证 (方式: {})", method));
+    let client = build_client(&proxy).map_err(|e| {
+        logger::error(&format!("两步验证失败：HTTP 客户端创建失败: {}", e));
+        e.to_string()
+    })?;
 
     let resp = client
         .post(url)
@@ -293,12 +313,20 @@ pub async fn cmd_verify_2fa(
         .json(&serde_json::json!({ "code": code.trim() }))
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            logger::error(&format!("两步验证失败：网络请求错误: {}", e));
+            e.to_string()
+        })?;
 
-    let data: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    let data: serde_json::Value = resp.json().await.map_err(|e| {
+        logger::error(&format!("两步验证失败：解析响应失败: {}", e));
+        e.to_string()
+    })?;
     if data.get("verified").and_then(|v| v.as_bool()).unwrap_or(false) {
+        logger::info("两步验证成功");
         Ok(LoginResult { success: true, requires_2fa: false, fa_methods: vec![], error: None })
     } else {
+        logger::warn("两步验证失败：验证码错误或已过期");
         Ok(LoginResult {
             success: false,
             requires_2fa: false,
@@ -318,9 +346,13 @@ pub async fn cmd_fetch_avatars(
         (s.auth_cookie.clone(), s.proxy.clone())
     };
 
-    let client = build_client(&proxy).map_err(|e| e.to_string())?;
+    let client = build_client(&proxy).map_err(|e| {
+        logger::error(&format!("获取资源列表失败：HTTP 客户端创建失败: {}", e));
+        e.to_string()
+    })?;
 
     // Step 1: fetch all .vrca files
+    logger::info("开始获取资源文件列表");
     let _ = window.emit("fetch-progress", "正在加载文件列表...");
     let mut all_files: Vec<serde_json::Value> = vec![];
     let mut offset = 0usize;
@@ -332,14 +364,24 @@ pub async fn cmd_fetch_avatars(
             .query(&[("n", "100"), ("offset", &offset.to_string())])
             .send()
             .await
-            .map_err(|e| e.to_string())?;
-        if resp.status() == 401 { return Err("登录已过期，请重新登录".to_string()); }
-        let data: Vec<serde_json::Value> = resp.json().await.map_err(|e| e.to_string())?;
+            .map_err(|e| {
+                logger::error(&format!("获取文件列表失败（offset={}）: {}", offset, e));
+                e.to_string()
+            })?;
+        if resp.status() == 401 {
+            logger::warn("获取文件列表失败：登录已过期 (HTTP 401)");
+            return Err("登录已过期，请重新登录".to_string());
+        }
+        let data: Vec<serde_json::Value> = resp.json().await.map_err(|e| {
+            logger::error(&format!("解析文件列表失败（offset={}）: {}", offset, e));
+            e.to_string()
+        })?;
         if data.is_empty() { break; }
         offset += data.len();
         all_files.extend(data);
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
+    logger::info(&format!("文件列表加载完成，共 {} 条记录", all_files.len()));
 
     // Step 2: fetch avatar image map
     let _ = window.emit("fetch-progress", "正在加载封面图映射...");
@@ -353,9 +395,18 @@ pub async fn cmd_fetch_avatars(
             .query(&[("n", "100"), ("offset", &av_offset.to_string()), ("releaseStatus", "all")])
             .send()
             .await
-            .map_err(|e| e.to_string())?;
-        if resp.status() == 401 { break; }
-        let data: Vec<serde_json::Value> = resp.json().await.map_err(|e| e.to_string())?;
+            .map_err(|e| {
+                logger::error(&format!("获取封面图映射失败（offset={}）: {}", av_offset, e));
+                e.to_string()
+            })?;
+        if resp.status() == 401 {
+            logger::warn("获取封面图映射失败：登录已过期 (HTTP 401)，跳过");
+            break;
+        }
+        let data: Vec<serde_json::Value> = resp.json().await.map_err(|e| {
+            logger::error(&format!("解析封面图映射失败（offset={}）: {}", av_offset, e));
+            e.to_string()
+        })?;
         if data.is_empty() { break; }
         av_offset += data.len();
         for av in &data {
@@ -409,6 +460,11 @@ pub async fn cmd_fetch_avatars(
     }
 
     avatars.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    if avatars.is_empty() {
+        logger::warn("资源列表为空：未在任何文件中找到 .vrca 资源");
+    } else {
+        logger::info(&format!("资源列表构建完成，共 {} 个资源", avatars.len()));
+    }
     let _ = window.emit("fetch-progress", format!("加载完成: {} 个资源", avatars.len()));
     Ok(avatars)
 }
@@ -420,6 +476,7 @@ pub async fn cleanup_cache(app: &tauri::AppHandle) {
         Err(_) => return,
     };
     let cutoff = std::time::SystemTime::now() - std::time::Duration::from_secs(20 * 86400);
+    let mut removed = 0u32;
     let mut entries = match tokio::fs::read_dir(&dir).await {
         Ok(e) => e,
         Err(_) => return,
@@ -429,9 +486,14 @@ pub async fn cleanup_cache(app: &tauri::AppHandle) {
         if !meta.is_file() { continue; }
         if let Ok(modified) = meta.modified() {
             if modified < cutoff {
-                let _ = tokio::fs::remove_file(entry.path()).await;
+                if tokio::fs::remove_file(entry.path()).await.is_ok() {
+                    removed += 1;
+                }
             }
         }
+    }
+    if removed > 0 {
+        logger::info(&format!("图片缓存清理完成，删除 {} 个过期文件", removed));
     }
 }
 
@@ -455,7 +517,10 @@ pub async fn cmd_fetch_image_bytes(
         .app_data_dir()
         .map_err(|e| e.to_string())?
         .join("img_cache");
-    tokio::fs::create_dir_all(&cache_dir).await.map_err(|e| e.to_string())?;
+    tokio::fs::create_dir_all(&cache_dir).await.map_err(|e| {
+        logger::error(&format!("创建图片缓存目录失败: {}", e));
+        e.to_string()
+    })?;
     let cache_path = cache_dir.join(&cache_key);
 
     // 命中磁盘缓存直接返回
@@ -468,14 +533,21 @@ pub async fn cmd_fetch_image_bytes(
         let s = state.lock().unwrap();
         (s.auth_cookie.clone(), s.proxy.clone())
     };
-    let client = build_client(&proxy).map_err(|e| e.to_string())?;
+    let client = build_client(&proxy).map_err(|e| {
+        logger::error(&format!("封面图下载失败：HTTP 客户端创建失败: {}", e));
+        e.to_string()
+    })?;
     let resp = client
         .get(&url)
         .header(header::COOKIE, cookie_header(&auth_cookie))
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            logger::warn(&format!("封面图下载失败: {} ({})", e, url));
+            e.to_string()
+        })?;
     if !resp.status().is_success() {
+        logger::warn(&format!("封面图下载失败: HTTP {} ({})", resp.status(), url));
         return Err(format!("HTTP {}", resp.status()));
     }
     let bytes = resp.bytes().await.map_err(|e| e.to_string())?.to_vec();
@@ -514,18 +586,31 @@ pub async fn cmd_save_session(
     if auth_cookie.is_empty() { return Ok(()); }
 
     let session = SessionFile { auth_cookie, proxy, display_name, saved_at: chrono::Utc::now().timestamp() };
-    let json = serde_json::to_vec(&session).map_err(|e| e.to_string())?;
-    let encrypted = encrypt(&json)?;
+    let json = serde_json::to_vec(&session).map_err(|e| {
+        logger::error(&format!("保存会话失败：序列化错误: {}", e));
+        e.to_string()
+    })?;
+    let encrypted = encrypt(&json).map_err(|e| {
+        logger::error(&format!("保存会话失败：加密错误: {}", e));
+        e
+    })?;
 
     let path = session_path(&app)?;
     if let Some(parent) = path.parent() {
-        tokio::fs::create_dir_all(parent).await.map_err(|e| e.to_string())?;
+        tokio::fs::create_dir_all(parent).await.map_err(|e| {
+            logger::error(&format!("保存会话失败：创建目录错误: {}", e));
+            e.to_string()
+        })?;
     }
     // 同时清理旧的明文 session.json
     let old = path.with_extension("json");
     let _ = tokio::fs::remove_file(&old).await;
 
-    tokio::fs::write(&path, encrypted).await.map_err(|e| e.to_string())?;
+    tokio::fs::write(&path, encrypted).await.map_err(|e| {
+        logger::error(&format!("保存会话失败：写入文件错误 ({}): {}", path.display(), e));
+        e.to_string()
+    })?;
+    logger::info("登录会话已保存");
     Ok(())
 }
 
@@ -535,6 +620,7 @@ pub async fn cmd_restore_session(
     app: tauri::AppHandle,
     state: tauri::State<'_, Mutex<AuthState>>,
 ) -> Result<String, String> {
+    logger::info("尝试恢复已保存的登录会话");
     let path = session_path(&app)?;
     let raw = match tokio::fs::read(&path).await {
         Ok(b) => b,
@@ -543,7 +629,10 @@ pub async fn cmd_restore_session(
             let old = path.with_extension("json");
             match tokio::fs::read_to_string(&old).await {
                 Ok(s) => s.into_bytes(),
-                Err(_) => return Ok(String::new()),
+                Err(_) => {
+                    logger::info("未找到已保存的会话");
+                    return Ok(String::new());
+                }
             }
         }
     };
@@ -552,32 +641,48 @@ pub async fn cmd_restore_session(
     let json_bytes = decrypt(&raw).unwrap_or_else(|_| raw.clone());
     let session: SessionFile = match serde_json::from_slice(&json_bytes) {
         Ok(s) => s,
-        Err(_) => { let _ = tokio::fs::remove_file(&path).await; return Ok(String::new()); }
+        Err(_) => {
+            logger::warn("会话文件无效（解析失败），已删除");
+            let _ = tokio::fs::remove_file(&path).await;
+            return Ok(String::new());
+        }
     };
 
     // 超过 30 天视为过期
     let age_days = (chrono::Utc::now().timestamp() - session.saved_at) / 86400;
     if age_days > 30 {
+        logger::warn(&format!("已保存的会话已过期（{} 天），已删除", age_days));
         let _ = tokio::fs::remove_file(&path).await;
         return Ok(String::new());
     }
 
     // 向 VRChat 验证 cookie 是否仍有效
-    let client = build_client(&session.proxy).map_err(|e| e.to_string())?;
+    let client = build_client(&session.proxy).map_err(|e| {
+        logger::error(&format!("会话恢复失败：HTTP 客户端创建失败: {}", e));
+        e.to_string()
+    })?;
     let resp = client
         .get(AUTH_URL)
         .header(header::COOKIE, cookie_header(&session.auth_cookie))
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            logger::error(&format!("会话恢复失败：验证请求错误: {}", e));
+            e.to_string()
+        })?;
 
     if resp.status() != 200 {
+        logger::warn(&format!("会话验证失败: HTTP {}，已删除", resp.status()));
         let _ = tokio::fs::remove_file(&path).await;
         return Ok(String::new());
     }
 
-    let payload: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    let payload: serde_json::Value = resp.json().await.map_err(|e| {
+        logger::error(&format!("会话恢复失败：解析响应错误: {}", e));
+        e.to_string()
+    })?;
     if payload.get("requiresTwoFactorAuth").is_some() || payload.get("id").is_none() {
+        logger::warn("会话已失效（服务器要求重新验证），已删除");
         let _ = tokio::fs::remove_file(&path).await;
         return Ok(String::new());
     }
@@ -594,11 +699,13 @@ pub async fn cmd_restore_session(
 
     // 如果当前读到的是旧版明文，重新加密保存一次完成迁移
     if decrypt(&raw).is_err() {
+        logger::info("检测到旧版明文会话，已迁移为加密格式");
         let _ = cmd_save_session(display_name.clone(), app.clone(), state).await;
         let old = path.with_extension("json");
         let _ = tokio::fs::remove_file(&old).await;
     }
 
+    logger::info(&format!("会话恢复成功 (用户: {})", display_name));
     Ok(display_name)
 }
 
@@ -610,6 +717,7 @@ pub async fn cmd_clear_session(app: tauri::AppHandle) -> Result<(), String> {
     // 同时清理旧版明文文件
     let old = path.with_extension("json");
     let _ = tokio::fs::remove_file(&old).await;
+    logger::info("已清除登录会话（退出登录）");
     Ok(())
 }
 
@@ -630,12 +738,22 @@ pub async fn cmd_save_config(
     config: AppConfig,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
-    let json = serde_json::to_string(&config).map_err(|e| e.to_string())?;
+    let json = serde_json::to_string(&config).map_err(|e| {
+        logger::error(&format!("保存配置失败：序列化错误: {}", e));
+        e.to_string()
+    })?;
     let path = config_path(&app)?;
     if let Some(parent) = path.parent() {
-        tokio::fs::create_dir_all(parent).await.map_err(|e| e.to_string())?;
+        tokio::fs::create_dir_all(parent).await.map_err(|e| {
+            logger::error(&format!("保存配置失败：创建目录错误: {}", e));
+            e.to_string()
+        })?;
     }
-    tokio::fs::write(&path, json).await.map_err(|e| e.to_string())?;
+    tokio::fs::write(&path, json).await.map_err(|e| {
+        logger::error(&format!("保存配置失败：写入文件错误 ({}): {}", path.display(), e));
+        e.to_string()
+    })?;
+    logger::info("配置已保存");
     Ok(())
 }
 
@@ -643,7 +761,16 @@ pub async fn cmd_save_config(
 pub async fn cmd_load_config(app: tauri::AppHandle) -> Result<AppConfig, String> {
     let path = config_path(&app)?;
     match tokio::fs::read_to_string(&path).await {
-        Ok(json) => serde_json::from_str(&json).map_err(|e| e.to_string()),
+        Ok(json) => match serde_json::from_str(&json) {
+            Ok(cfg) => {
+                logger::info("配置加载成功");
+                Ok(cfg)
+            }
+            Err(e) => {
+                logger::error(&format!("解析配置文件失败 ({}): {}", path.display(), e));
+                Err(e.to_string())
+            }
+        },
         Err(_) => Ok(AppConfig::default()),
     }
 }

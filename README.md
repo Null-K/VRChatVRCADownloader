@@ -67,7 +67,6 @@
 
 **系统要求**：Windows 10 1803+ 或 Windows 11，需要 [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)（Windows 11 及较新的 Windows 10 系统已自带）。
 
-
 ## 使用方法
 
 1. 启动程序，点击顶栏 **登录账号**
@@ -76,11 +75,16 @@
 4. 点击卡片选中模型，在右侧详情面板点击 **下载此模型**，或悬停在卡片上点击下载图标
 5. 在底部任务栏查看进度，可终止、重试或清理任务
 
+## 日志文件
+
+软件会在运行目录下生成 `VRChatDownloader.log` 日志文件，记录登录、列表同步、下载等关键过程，提交反馈时可将该文件一并发送。
+
+- 日志文件与 `.old` 轮转文件可随时删除，不影响使用
+- 若软件所在目录没有写入权限，日志会改存到系统应用数据目录（`%APPDATA%\com.puddingkc.vrca-downloader\`）
 
 ## 反馈 & 交流群
 
 - `1047423396`
-
 
 ## 本地开发
 
